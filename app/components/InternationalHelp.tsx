@@ -991,6 +991,31 @@ const OFFICES: CountryOffice[] = [
     ],
   },
   {
+    country: "Jamaica",
+    countryCode: "JM",
+    organization: "Gobierno de Jamaica",
+    lines: [
+      {
+        type: "web",
+        label: "Jamaica lista para apoyar alivio regional",
+        href: "https://jamaica-gleaner.com/article/world-news/20260625/govt-opposition-voice-solidarity-venezuela-following-deadly-venezuela",
+      },
+    ],
+    shareChannels: [
+      {
+        name: "Apoyo de Jamaica",
+        description:
+          "Jamaica informó que está lista para apoyar el esfuerzo de alivio y recuperación en lo que pueda, junto a la comunidad regional.",
+        href: "https://jamaica-gleaner.com/article/world-news/20260625/govt-opposition-voice-solidarity-venezuela-following-deadly-venezuela",
+        source: "Jamaica Gleaner",
+        sourceHref:
+          "https://jamaica-gleaner.com/article/world-news/20260625/govt-opposition-voice-solidarity-venezuela-following-deadly-venezuela",
+        updatedAt: "25 jun 2026",
+        status: "verified",
+      },
+    ],
+  },
+  {
     country: "Italia",
     countryCode: "IT",
     organization: "Croce Rossa Italiana / Save the Children Italia",
@@ -1441,6 +1466,31 @@ const OFFICES: CountryOffice[] = [
     ],
   },
   {
+    country: "Trinidad y Tobago",
+    countryCode: "TT",
+    organization: "Gobierno de Trinidad y Tobago",
+    lines: [
+      {
+        type: "web",
+        label: "Trinidad y Tobago preparado para asistir",
+        href: "https://demerarawaves.com/2026/06/25/guyana-barbados-trinidad-ready-to-assist-earthquake-devastated-venezuela/",
+      },
+    ],
+    shareChannels: [
+      {
+        name: "Apoyo de Trinidad y Tobago",
+        description:
+          "El gobierno indicó que está preparado para proporcionar apoyo y asistencia solicitada a las autoridades venezolanas, donde sea posible.",
+        href: "https://demerarawaves.com/2026/06/25/guyana-barbados-trinidad-ready-to-assist-earthquake-devastated-venezuela/",
+        source: "Demerara Waves",
+        sourceHref:
+          "https://demerarawaves.com/2026/06/25/guyana-barbados-trinidad-ready-to-assist-earthquake-devastated-venezuela/",
+        updatedAt: "25 jun 2026",
+        status: "verified",
+      },
+    ],
+  },
+  {
     country: "Uruguay",
     countryCode: "UY",
     organization: "Venezolanos en Uruguay",
@@ -1659,6 +1709,7 @@ const TIME_ZONE_COUNTRY_CODES: Record<string, string> = {
   "Europe/Dublin": "IE",
   "Asia/Jerusalem": "IL",
   "Europe/Rome": "IT",
+  "America/Jamaica": "JM",
   "America/Mexico_City": "MX",
   "Europe/Amsterdam": "NL",
   "Pacific/Auckland": "NZ",
@@ -1668,6 +1719,7 @@ const TIME_ZONE_COUNTRY_CODES: Record<string, string> = {
   "Europe/London": "GB",
   "Europe/Stockholm": "SE",
   "Africa/Johannesburg": "ZA",
+  "America/Port_of_Spain": "TT",
   "America/Montevideo": "UY",
   "America/New_York": "US",
   "America/Chicago": "US",
