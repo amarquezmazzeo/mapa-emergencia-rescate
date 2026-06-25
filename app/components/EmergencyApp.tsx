@@ -10,6 +10,7 @@ import {
 } from "@/lib/types";
 import ReportForm from "./ReportForm";
 import AdminLogin from "./AdminLogin";
+import AddressSearch, { type GeocodeResult } from "./AddressSearch";
 
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
@@ -32,6 +33,11 @@ export default function EmergencyApp() {
   const [query, setQuery] = useState("");
   const [adminToken, setAdminToken] = useState<string | null>(null);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [focus, setFocus] = useState<{
+    lat: number;
+    lng: number;
+    ts: number;
+  } | null>(null);
 
   const isAdmin = Boolean(adminToken);
 
@@ -91,6 +97,11 @@ export default function EmergencyApp() {
 
   const handlePick = useCallback((lat: number, lng: number) => {
     setDraft({ lat, lng });
+  }, []);
+
+  const handleAddressSelect = useCallback((result: GeocodeResult) => {
+    setFocus({ lat: result.lat, lng: result.lng, ts: Date.now() });
+    setDraft({ lat: result.lat, lng: result.lng });
   }, []);
 
   const handleSubmit = useCallback(
@@ -177,18 +188,22 @@ export default function EmergencyApp() {
   return (
     <section id="mapa" className="mx-auto w-full max-w-7xl px-4 py-10">
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-        <div className="relative h-[520px] overflow-hidden rounded-2xl border border-slate-200 shadow-sm lg:h-[640px]">
+        <div className="flex flex-col gap-3">
+          <AddressSearch onSelect={handleAddressSelect} />
+          <div className="relative h-[520px] overflow-hidden rounded-2xl border border-slate-200 shadow-sm lg:h-[640px]">
           <MapView
             reports={reports}
             draft={draft}
             onPick={handlePick}
             onResolve={handleResolve}
             isAdmin={isAdmin}
+            focus={focus}
             center={CARACAS}
             zoom={12}
           />
           <div className="pointer-events-none absolute left-1/2 top-3 z-[1000] -translate-x-1/2 rounded-full bg-slate-900/85 px-4 py-1.5 text-center text-xs font-medium text-white shadow">
             Toca un punto del mapa para reportar
+          </div>
           </div>
         </div>
 

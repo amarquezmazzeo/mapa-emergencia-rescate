@@ -29,6 +29,22 @@ function markerIcon(type: ReportType): L.DivIcon {
   return icon;
 }
 
+function FlyToHandler({
+  focus,
+}: {
+  focus: { lat: number; lng: number; ts: number } | null;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    if (focus) {
+      map.flyTo([focus.lat, focus.lng], Math.max(map.getZoom(), 16), {
+        duration: 1,
+      });
+    }
+  }, [focus, map]);
+  return null;
+}
+
 function ResizeHandler() {
   const map = useMap();
   useEffect(() => {
@@ -64,6 +80,7 @@ interface MapViewProps {
   onPick: (lat: number, lng: number) => void;
   onResolve: (id: string) => void;
   isAdmin: boolean;
+  focus: { lat: number; lng: number; ts: number } | null;
   center: [number, number];
   zoom: number;
 }
@@ -74,6 +91,7 @@ export default function MapView({
   onPick,
   onResolve,
   isAdmin,
+  focus,
   center,
   zoom,
 }: MapViewProps) {
@@ -100,6 +118,7 @@ export default function MapView({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <ResizeHandler />
+      <FlyToHandler focus={focus} />
       <ClickHandler onPick={onPick} />
 
       {reports.map((report) => (
