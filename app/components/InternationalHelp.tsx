@@ -155,6 +155,56 @@ const OFFICES: CountryOffice[] = [
     ],
   },
   {
+    country: "Australia",
+    countryCode: "AU",
+    organization: "Emergency Action Alliance / Save the Children Australia",
+    lines: [
+      {
+        type: "web",
+        label: "Emergency Action Alliance - Venezuela Earthquake",
+        href: "https://emergencyaction.org.au/venezuela-earthquake/",
+      },
+      {
+        type: "web",
+        label: "Australian Red Cross Global Emergency Fund",
+        href: "https://www.redcross.org.au/global-emergency",
+      },
+    ],
+    shareChannels: [
+      {
+        name: "Emergency Action Alliance Australia",
+        description:
+          "Alianza australiana monitoreando la emergencia y preparando rutas de apelación para organizaciones miembro.",
+        href: "https://emergencyaction.org.au/venezuela-earthquake/",
+        source: "Emergency Action Alliance",
+        sourceHref: "https://emergencyaction.org.au/venezuela-earthquake/",
+        updatedAt: "25 jun 2026",
+        status: "verified",
+      },
+      {
+        name: "Save the Children Australia",
+        description:
+          "Canal australiano de Save the Children difundiendo la respuesta a los terremotos en Venezuela.",
+        href: "https://www.facebook.com/SaveTheChildrenAustralia/posts/powerful-earthquakes-have-devastated-parts-of-venezuela-leaving-people-trapped-b/1496229342537409/",
+        source: "Save the Children Australia",
+        sourceHref:
+          "https://www.facebook.com/SaveTheChildrenAustralia/posts/powerful-earthquakes-have-devastated-parts-of-venezuela-leaving-people-trapped-b/1496229342537409/",
+        updatedAt: "25 jun 2026",
+        status: "social",
+      },
+      {
+        name: "Australian Red Cross Global Emergency Fund",
+        description:
+          "Fondo global para emergencias internacionales de Cruz Roja Australiana.",
+        href: "https://www.redcross.org.au/global-emergency",
+        source: "Australian Red Cross",
+        sourceHref: "https://www.redcross.org.au/global-emergency",
+        updatedAt: "25 jun 2026",
+        status: "verified",
+      },
+    ],
+  },
+  {
     country: "Canadá",
     countryCode: "CA",
     organization: "San Lorenzo Community Center",
@@ -573,6 +623,30 @@ const OFFICES: CountryOffice[] = [
     ],
   },
   {
+    country: "Francia",
+    countryCode: "FR",
+    organization: "Croix-Rouge française",
+    lines: [
+      {
+        type: "web",
+        label: "Croix-Rouge française - séismes Venezuela",
+        href: "https://donner.croix-rouge.fr/~share?cid=394&lang=en_EN",
+      },
+    ],
+    shareChannels: [
+      {
+        name: "Croix-Rouge française",
+        description:
+          "Donaciones destinadas a acciones de la Cruz Roja Francesa en apoyo a poblaciones afectadas por los terremotos.",
+        href: "https://donner.croix-rouge.fr/~share?cid=394&lang=en_EN",
+        source: "Croix-Rouge française",
+        sourceHref: "https://donner.croix-rouge.fr/~share?cid=394&lang=en_EN",
+        updatedAt: "25 jun 2026",
+        status: "verified",
+      },
+    ],
+  },
+  {
     country: "Honduras",
     countryCode: "HN",
     organization: "Cruz Roja Hondureña",
@@ -892,6 +966,30 @@ const OFFICES: CountryOffice[] = [
     ],
   },
   {
+    country: "Suiza",
+    countryCode: "CH",
+    organization: "Swiss Red Cross",
+    lines: [
+      {
+        type: "web",
+        label: "Swiss Red Cross - Earthquake in Venezuela",
+        href: "https://www.redcross.ch/en",
+      },
+    ],
+    shareChannels: [
+      {
+        name: "Swiss Red Cross",
+        description:
+          "Canal oficial suizo para apoyo a operaciones de rescate y asistencia médica a afectados por el terremoto.",
+        href: "https://www.redcross.ch/en",
+        source: "Swiss Red Cross",
+        sourceHref: "https://www.redcross.ch/en",
+        updatedAt: "25 jun 2026",
+        status: "verified",
+      },
+    ],
+  },
+  {
     country: "Estados Unidos",
     countryCode: "US",
     organization: "Cruz Roja Americana / organizaciones locales",
@@ -1039,6 +1137,11 @@ const CONTACT_ICON = {
 const TIME_ZONE_COUNTRY_CODES: Record<string, string> = {
   "America/Argentina/Buenos_Aires": "AR",
   "America/Aruba": "AW",
+  "Australia/Sydney": "AU",
+  "Australia/Melbourne": "AU",
+  "Australia/Brisbane": "AU",
+  "Australia/Perth": "AU",
+  "Europe/Zurich": "CH",
   "America/Bogota": "CO",
   "America/Toronto": "CA",
   "America/Vancouver": "CA",
@@ -1050,6 +1153,7 @@ const TIME_ZONE_COUNTRY_CODES: Record<string, string> = {
   "America/Santo_Domingo": "DO",
   "Europe/Madrid": "ES",
   "Atlantic/Canary": "ES",
+  "Europe/Paris": "FR",
   "America/Tegucigalpa": "HN",
   "Europe/Dublin": "IE",
   "America/Mexico_City": "MX",
