@@ -96,13 +96,12 @@ export default function Home() {
           </a>
           <HeroMobileCta />
         </div>
+        <DonationsTicker variant="hero" />
       </header>
 
       <MobileStickyNav />
 
       <MissingPersonsCarousel />
-
-      <DonationsTicker />
 
       <section id="tutorial" className="mx-auto w-full max-w-7xl px-4 py-10">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
