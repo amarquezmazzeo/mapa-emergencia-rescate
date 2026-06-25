@@ -115,7 +115,10 @@ export default function EmergencyContacts() {
 
   return (
     <section id="telefonos" className="mx-auto w-full max-w-7xl px-4 py-10">
-      <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <details
+        open
+        className="group rounded-2xl border border-slate-200 bg-white shadow-sm"
+      >
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl p-4 sm:p-6">
           <div>
             <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900">
