@@ -84,3 +84,21 @@ summary {
     transform: rotate(-45deg) scale(1.18);
   }
 }
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    box-shadow:
+      0 10px 15px -3px rgb(124 58 237 / 0.35),
+      0 0 0 0 rgb(124 58 237 / 0.45);
+  }
+  50% {
+    box-shadow:
+      0 10px 15px -3px rgb(124 58 237 / 0.35),
+      0 0 0 8px rgb(124 58 237 / 0);
+  }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2.4s ease-in-out infinite;
+}

@@ -4,6 +4,7 @@ import { GoogleAnalytics } from "@next/third-parties/google";
 import "./globals.css";
 import PwaRegister from "./components/PwaRegister";
 import MourningRibbon from "./components/MourningRibbon";
+import StickyHelpButton from "./components/StickyHelpButton";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -122,6 +123,7 @@ export default function RootLayout({
 
         {children}
         <PwaRegister />
+        <StickyHelpButton />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

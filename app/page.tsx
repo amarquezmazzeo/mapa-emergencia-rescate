@@ -7,6 +7,7 @@ import InternationalHelp from "./components/InternationalHelp";
 import SurvivalGuide from "./components/SurvivalGuide";
 import CollectionCenters from "./components/CollectionCenters";
 import { REPORT_TYPES, type ReportType } from "@/lib/types";
+import { CONTACT_EMAIL, contactMailto } from "@/lib/site";
 
 const MissingPersonsCarousel = dynamic(
   () => import("./components/MissingPersonsCarousel"),
@@ -82,6 +83,13 @@ export default function Home() {
             Reporte ciudadano en tiempo real para coordinar rescates, identificar
             daños estructurales y organizar la entrega de ayuda humanitaria.
           </h2>
+          <a
+            href={contactMailto()}
+            className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white backdrop-blur-sm transition hover:bg-white/20"
+          >
+            <span aria-hidden>✉️</span>
+            {CONTACT_EMAIL}
+          </a>
           <div className="mx-auto mt-5 grid w-full max-w-md grid-cols-2 gap-2 sm:mt-6 sm:flex sm:max-w-none sm:flex-wrap sm:justify-center sm:gap-3">
             <a
               href="#mapa"
@@ -299,6 +307,13 @@ export default function Home() {
                 pueda pedir y ofrecer ayuda en tiempo real. El proyecto es
                 gratuito, sin fines de lucro y de código abierto.
               </p>
+              <a
+                href={contactMailto()}
+                className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 transition hover:border-slate-300 hover:bg-slate-50"
+              >
+                <span aria-hidden>✉️</span>
+                {CONTACT_EMAIL}
+              </a>
               <div className="mt-4 flex flex-wrap gap-3">
                 <a
                   href="https://x.com/allanodremans"
