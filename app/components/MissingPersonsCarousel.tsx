@@ -34,6 +34,7 @@ const MAX_PREVIEW = 24;
 
 export default function MissingPersonsCarousel() {
   const [people, setPeople] = useState<MissingPerson[]>([]);
+  const [total, setTotal] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState<MissingPerson | null>(null);
   const network = useLowBandwidthMode(
@@ -46,10 +47,16 @@ export default function MissingPersonsCarousel() {
 
   const fetchPeople = useCallback(async () => {
     try {
-      const res = await fetch("/api/missing", { cache: "no-store" });
+      // Solo necesitamos la primera página para la vista previa; el total
+      // viene del servidor para el contador y el enlace "ver N más".
+      const res = await fetch(
+        `/api/missing?status=active&page=1&pageSize=${MAX_PREVIEW}`,
+        { cache: "no-store" },
+      );
       if (!res.ok) return;
       const data = await res.json();
       setPeople(data.people ?? []);
+      setTotal(data.total ?? (data.people?.length ?? 0));
     } catch {
       // se reintentará en el próximo ciclo
     }
@@ -123,8 +130,9 @@ export default function MissingPersonsCarousel() {
       setPeople((prev) =>
         prev.some((p) => p.id === data.person.id)
           ? prev
-          : [data.person, ...prev],
+          : [data.person, ...prev].slice(0, MAX_PREVIEW),
       );
+      setTotal((t) => t + 1);
     } else {
       fetchPeople();
     }
@@ -146,9 +154,9 @@ export default function MissingPersonsCarousel() {
               </h2>
               <span
                 className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-800"
-                aria-label={`${people.length} personas reportadas`}
+                aria-label={`${total} personas reportadas`}
               >
-                {people.length} reportada{people.length === 1 ? "" : "s"}
+                {total} reportada{total === 1 ? "" : "s"}
               </span>
             </div>
             <p className="mt-1 max-w-2xl text-sm text-slate-600">
@@ -269,7 +277,7 @@ export default function MissingPersonsCarousel() {
               ))
             )}
 
-            {people.length > MAX_PREVIEW && (
+            {total > preview.length && (
               <a
                 href="#desaparecidas"
                 className="flex w-[160px] shrink-0 snap-start flex-col items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-center text-slate-700 shadow-sm transition hover:border-purple-300 hover:bg-purple-50 sm:w-[180px]"
@@ -279,7 +287,7 @@ export default function MissingPersonsCarousel() {
                   →
                 </span>
                 <span className="text-sm font-semibold">
-                  Ver {people.length - MAX_PREVIEW} más
+                  Ver {total - preview.length} más
                 </span>
                 <span className="text-[11px] text-slate-500">
                   Ir a la lista completa

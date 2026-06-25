@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import MissingPersonDetail from "./MissingPersonDetail";
 import { useLowBandwidthMode } from "./useLowBandwidthMode";
 
@@ -21,6 +21,7 @@ interface MissingPerson {
 
 const POLL_INTERVAL_MS = 20_000;
 const LOW_BANDWIDTH_POLL_INTERVAL_MS = 60_000;
+const PAGE_SIZE = 48;
 
 function formatDate(ts: number | null | undefined): string {
   if (!ts) return "";
@@ -34,6 +35,9 @@ function formatDate(ts: number | null | undefined): string {
 
 export default function FoundPersons() {
   const [people, setPeople] = useState<MissingPerson[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<MissingPerson | null>(null);
   const network = useLowBandwidthMode(
     POLL_INTERVAL_MS,
@@ -42,16 +46,23 @@ export default function FoundPersons() {
 
   const fetchFound = useCallback(async () => {
     try {
-      const res = await fetch("/api/missing?status=found", {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/missing?status=found&page=${page}&pageSize=${PAGE_SIZE}`,
+        { cache: "no-store" },
+      );
       if (!res.ok) return;
       const data = await res.json();
       setPeople(data.people ?? []);
+      setTotal(data.total ?? 0);
+      setTotalPages(data.totalPages ?? 1);
+      // El servidor acota la página al rango válido.
+      if (typeof data.page === "number" && data.page !== page) {
+        setPage(data.page);
+      }
     } catch {
       // se reintenta en el próximo ciclo
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -76,14 +87,8 @@ export default function FoundPersons() {
     };
   }, [fetchFound, network.pollIntervalMs]);
 
-  const sorted = useMemo(() => {
-    // Más recientes primero según cuándo fueron localizadas.
-    return [...people].sort(
-      (a, b) => (b.resolvedAt ?? b.createdAt) - (a.resolvedAt ?? a.createdAt),
-    );
-  }, [people]);
-
-  if (sorted.length === 0) {
+  // El servidor ya ordena por fecha de localización (resolved_at) desc.
+  if (total === 0) {
     return null;
   }
 
@@ -101,9 +106,9 @@ export default function FoundPersons() {
               </span>
               <span
                 className="inline-flex items-center rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-bold text-white"
-                aria-label={`${sorted.length} personas localizadas`}
+                aria-label={`${total} personas localizadas`}
               >
-                {sorted.length} localizada{sorted.length === 1 ? "" : "s"}
+                {total} localizada{total === 1 ? "" : "s"}
               </span>
             </div>
             <h2 className="mt-2 text-xl font-bold text-slate-900 sm:text-2xl">
@@ -124,7 +129,7 @@ export default function FoundPersons() {
         </div>
 
         <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {sorted.map((person) => (
+          {people.map((person) => (
             <li key={person.id}>
               <button
                 type="button"
@@ -178,6 +183,33 @@ export default function FoundPersons() {
             </li>
           ))}
         </ul>
+
+        {totalPages > 1 && (
+          <nav
+            className="mt-6 flex items-center justify-center gap-3"
+            aria-label="Paginación de personas localizadas"
+          >
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded-md border border-emerald-200 px-3 py-1.5 text-sm font-medium text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-40"
+            >
+              ← Anterior
+            </button>
+            <span className="text-xs text-slate-500">
+              Página {page} de {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="rounded-md border border-emerald-200 px-3 py-1.5 text-sm font-medium text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-40"
+            >
+              Siguiente →
+            </button>
+          </nav>
+        )}
       </div>
 
       {selected && (

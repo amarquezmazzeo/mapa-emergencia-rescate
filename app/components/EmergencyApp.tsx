@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   REPORT_TYPES,
   REPORT_TYPE_KEYS,
@@ -13,6 +13,13 @@ import AdminLogin from "./AdminLogin";
 import AddressSearch, { type GeocodeResult } from "./AddressSearch";
 import { useLowBandwidthMode } from "./useLowBandwidthMode";
 import { distanceMeters, freshnessClass, timeAgo } from "@/lib/format";
+import {
+  countPending,
+  enqueueReport,
+  listPending,
+  removePending,
+  type QueuedPayload,
+} from "@/lib/offline-queue";
 
 const DUPLICATE_RADIUS_M = 50;
 const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -62,6 +69,42 @@ const REPORT_TYPE_SHORT: Record<ReportType, string> = {
   building: "Edificios",
 };
 
+type SubmitOutcome =
+  | { status: "ok"; report?: EmergencyReport }
+  // Fallo transitorio (sin conexión, 429 o 503): conviene encolar y reintentar.
+  | { status: "queue" }
+  // Fallo permanente (datos inválidos): no tiene sentido reintentar.
+  | { status: "drop"; error: string };
+
+/** Envía un reporte al servidor y clasifica el resultado para decidir si se
+ * muestra, se encola para reintento, o se descarta. */
+async function postReportToServer(
+  payload: QueuedPayload,
+): Promise<SubmitOutcome> {
+  let res: Response;
+  try {
+    res = await fetch("/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // Red caída: no llegó al servidor.
+    return { status: "queue" };
+  }
+  if (res.ok) {
+    const data = await res.json().catch(() => ({}));
+    return { status: "ok", report: data.report };
+  }
+  // Servidor alcanzable pero con error transitorio: reintentamos más tarde.
+  if (res.status === 429 || res.status === 503) return { status: "queue" };
+  const data = await res.json().catch(() => ({}));
+  return {
+    status: "drop",
+    error: data.error ?? "No se pudo publicar la alerta.",
+  };
+}
+
 export default function EmergencyApp() {
   const [reports, setReports] = useState<EmergencyReport[]>([]);
   const network = useLowBandwidthMode(
@@ -83,6 +126,9 @@ export default function EmergencyApp() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
   const [now, setNow] = useState<number>(() => Date.now());
   const [query, setQuery] = useState("");
+  const [pendingCount, setPendingCount] = useState(0);
+  const [queuedFlash, setQueuedFlash] = useState(false);
+  const flushingRef = useRef(false);
   const [adminToken, setAdminToken] = useState<string | null>(() =>
     typeof window === "undefined"
       ? null
@@ -187,6 +233,66 @@ export default function EmergencyApp() {
     };
   }, [fetchReports, network.pollIntervalMs]);
 
+  // Intenta enviar los reportes encolados sin conexión. Se detiene en cuanto
+  // la red vuelve a fallar y reintentará en el siguiente disparo.
+  const flushPending = useCallback(async () => {
+    if (flushingRef.current) return;
+    flushingRef.current = true;
+    try {
+      const pending = await listPending();
+      for (const item of pending) {
+        const outcome = await postReportToServer(item.payload);
+        if (outcome.status === "ok") {
+          await removePending(item.localId);
+          if (outcome.report) {
+            const created = outcome.report;
+            setReports((prev) =>
+              prev.some((r) => r.id === created.id) ? prev : [created, ...prev],
+            );
+          }
+        } else if (outcome.status === "drop") {
+          // El servidor rechazó los datos: lo descartamos para no reintentar
+          // indefinidamente un reporte que nunca será aceptado.
+          await removePending(item.localId);
+        } else {
+          // Sigue sin conexión: cortamos el barrido y reintentamos luego.
+          break;
+        }
+      }
+    } finally {
+      flushingRef.current = false;
+      try {
+        setPendingCount(await countPending());
+      } catch {
+        /* IndexedDB no disponible: dejamos el contador como está */
+      }
+    }
+  }, []);
+
+  // Cuenta pendientes al cargar, intenta enviarlos y reintenta al recuperar la
+  // conexión (el evento "online" del navegador).
+  useEffect(() => {
+    flushPending();
+    const onOnline = () => flushPending();
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [flushPending]);
+
+  // Mientras queden pendientes, reintenta periódicamente por si la conexión
+  // volvió de forma intermitente sin disparar el evento "online".
+  useEffect(() => {
+    if (pendingCount === 0) return;
+    const id = setInterval(() => flushPending(), 15_000);
+    return () => clearInterval(id);
+  }, [pendingCount, flushPending]);
+
+  // Oculta el aviso de "reporte guardado" tras unos segundos.
+  useEffect(() => {
+    if (!queuedFlash) return;
+    const id = setTimeout(() => setQueuedFlash(false), 5000);
+    return () => clearTimeout(id);
+  }, [queuedFlash]);
+
   const handlePick = useCallback((lat: number, lng: number) => {
     setDraft({ lat, lng });
   }, []);
@@ -245,24 +351,38 @@ export default function EmergencyApp() {
         }
       }
 
-      const res = await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, lat: draft.lat, lng: draft.lng }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "No se pudo publicar la alerta.");
+      const full: QueuedPayload = { ...payload, lat: draft.lat, lng: draft.lng };
+      const outcome = await postReportToServer(full);
+
+      if (outcome.status === "drop") {
+        // Datos rechazados por el servidor: el formulario muestra el error.
+        throw new Error(outcome.error);
       }
-      const data = await res.json().catch(() => ({}));
+
+      if (outcome.status === "queue") {
+        // Sin conexión o servidor no disponible: guardamos el reporte en el
+        // dispositivo y lo reintentamos automáticamente al recuperar la red.
+        try {
+          await enqueueReport(full);
+        } catch {
+          throw new Error(
+            "No hay conexión y no se pudo guardar el reporte en este dispositivo. Inténtalo de nuevo.",
+          );
+        }
+        setDraft(null);
+        setPendingCount(await countPending());
+        setQueuedFlash(true);
+        return;
+      }
+
+      // outcome.status === "ok"
       setDraft(null);
       // Update optimista: el reporte propio se ve al instante aunque el CDN
       // sirva una versión cacheada de la lista durante unos segundos.
-      if (data.report) {
+      if (outcome.report) {
+        const created = outcome.report;
         setReports((prev) =>
-          prev.some((r) => r.id === data.report.id)
-            ? prev
-            : [data.report, ...prev],
+          prev.some((r) => r.id === created.id) ? prev : [created, ...prev],
         );
       }
     },
@@ -322,6 +442,26 @@ export default function EmergencyApp() {
 
   return (
     <section id="mapa" className="mx-auto w-full max-w-7xl px-4 py-10">
+      {pendingCount > 0 && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <span className="flex items-center gap-2">
+            <span aria-hidden>📡</span>
+            <span>
+              {pendingCount === 1
+                ? "1 reporte sin enviar"
+                : `${pendingCount} reportes sin enviar`}
+              {" · se enviarán automáticamente al recuperar la conexión."}
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => flushPending()}
+            className="shrink-0 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"
+          >
+            Reintentar ahora
+          </button>
+        </div>
+      )}
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="flex flex-col gap-3">
           {network.isConstrained && (
@@ -589,6 +729,16 @@ export default function EmergencyApp() {
           onCancel={() => setShowAdminLogin(false)}
           onSuccess={loginAdmin}
         />
+      )}
+
+      {queuedFlash && (
+        <div
+          role="status"
+          className="fixed inset-x-0 bottom-4 z-[2500] mx-auto w-fit max-w-[92%] rounded-full bg-slate-900 px-4 py-2 text-center text-sm font-medium text-white shadow-lg"
+        >
+          ✅ Reporte guardado. Se enviará automáticamente cuando vuelva la
+          conexión.
+        </div>
       )}
     </section>
   );

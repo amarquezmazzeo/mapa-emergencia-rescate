@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import {
   addMissing,
+  DEFAULT_PAGE_SIZE,
   isValidPhotoDataUrl,
-  listMissing,
+  listMissingPage,
   MAX_NAME,
   MAX_PHOTO_CHARS,
+  type MissingStatusFilter,
 } from "@/lib/missing";
 import { isPersistent } from "@/lib/store";
 import { checkRateLimit, clientIp } from "@/lib/ratelimit";
@@ -16,21 +18,31 @@ const LIST_CACHE_HEADERS = {
 };
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const status = url.searchParams.get("status");
+  const params = new URL(request.url).searchParams;
   // Por defecto se listan solo las personas activas (las localizadas se
   // ocultan para proteger su privacidad y mantener el foco). Con
   // ?status=found devolvemos solo las localizadas (caso "muro de
   // esperanza"); con ?status=all devolvemos ambas.
-  const all = await listMissing({ includeFound: true });
-  let people = all.filter((p) => p.status === "active");
-  if (status === "found") {
-    people = all.filter((p) => p.status === "found");
-  } else if (status === "all") {
-    people = all;
-  }
+  const statusParam = params.get("status");
+  const status: MissingStatusFilter =
+    statusParam === "found" ? "found" : statusParam === "all" ? "all" : "active";
+
+  const result = await listMissingPage({
+    status,
+    page: Number(params.get("page") ?? "1"),
+    pageSize: Number(params.get("pageSize") ?? String(DEFAULT_PAGE_SIZE)),
+    search: params.get("q") ?? undefined,
+  });
+
   return NextResponse.json(
-    { people, persistent: isPersistent() },
+    {
+      people: result.people,
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      totalPages: result.totalPages,
+      persistent: isPersistent(),
+    },
     { headers: LIST_CACHE_HEADERS },
   );
 }

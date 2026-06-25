@@ -40,12 +40,11 @@ export function useLowBandwidthMode(
   normalPollMs: number,
   constrainedPollMs: number,
 ) {
-  const [state, setState] = useState(() => {
-    if (typeof navigator === "undefined") {
-      return { isOnline: true, isConstrained: false };
-    }
-    return readLowBandwidthState();
-  });
+  // El primer render debe ser idéntico en servidor y cliente: arrancamos con un
+  // estado neutro y determinista. El estado real de la red (que solo existe en
+  // el cliente) se aplica tras montar, en el efecto de abajo. Leerlo durante el
+  // render inicial provocaría un error de hidratación.
+  const [state, setState] = useState({ isOnline: true, isConstrained: false });
 
   useEffect(() => {
     const update = () => setState(readLowBandwidthState());

@@ -38,7 +38,16 @@ export const MAX_CONTACT = 120;
 /** Límite del data URL de la foto (~1.4 MB en base64 ≈ 1 MB de imagen). */
 export const MAX_PHOTO_CHARS = 1_400_000;
 
-const FETCH_LIMIT = 1000;
+/** Tamaño de página por defecto y máximo permitido para el listado paginado. */
+export const DEFAULT_PAGE_SIZE = 48;
+export const MAX_PAGE_SIZE = 100;
+
+/**
+ * Indica si la búsqueda acento-insensitiva (unaccent + pg_trgm) quedó lista.
+ * Si las extensiones no están disponibles, se cae a ILIKE sobre las columnas
+ * crudas (sensible a acentos) para no perder la funcionalidad.
+ */
+let accentSearchReady = false;
 
 let _schemaReady: Promise<void> | null = null;
 function ensureSchema(): Promise<void> {
@@ -62,6 +71,38 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE missing_persons ADD COLUMN IF NOT EXISTS resolution_note TEXT`;
       await sql`ALTER TABLE missing_persons ADD COLUMN IF NOT EXISTS resolution_photo TEXT`;
       await sql`ALTER TABLE missing_persons ADD COLUMN IF NOT EXISTS resolved_at BIGINT`;
+
+      // Índice del listado paginado: filtro por estado + orden + offset.
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_missing_status_created
+        ON missing_persons (status, created_at DESC, id DESC)
+      `;
+
+      // Búsqueda acento-insensitiva (best-effort). Un fallo aquí (p. ej. sin
+      // permiso para crear extensiones) no debe romper el listado.
+      try {
+        await sql`CREATE EXTENSION IF NOT EXISTS unaccent`;
+        await sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`;
+        // El primer argumento debe ser un regdictionary explícito: así la
+        // función es realmente IMMUTABLE y puede usarse en un índice (la forma
+        // de 1 argumento es STABLE y la de 2 args sin cast no resuelve el
+        // overload al inlinear en el índice).
+        await sql`
+          CREATE OR REPLACE FUNCTION f_unaccent(text) RETURNS text
+          LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT AS
+          $func$ SELECT public.unaccent('public.unaccent'::regdictionary, $1) $func$
+        `;
+        await sql`
+          CREATE INDEX IF NOT EXISTS idx_missing_search ON missing_persons
+          USING gin (
+            f_unaccent(name || ' ' || last_seen || ' ' || coalesce(description, ''))
+            gin_trgm_ops
+          )
+        `;
+        accentSearchReady = true;
+      } catch {
+        accentSearchReady = false;
+      }
     })();
   }
   return _schemaReady;
@@ -119,49 +160,177 @@ export function isValidPhotoDataUrl(photo: string): boolean {
   return /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(photo);
 }
 
+/** Columnas que alimentan `rowToPerson` (sin exponer las fotos embebidas). */
+const SELECT_COLS = `id, name, age, description, last_seen, contact,
+  (photo IS NOT NULL) AS has_photo,
+  status,
+  resolution_note,
+  (resolution_photo IS NOT NULL) AS has_resolution_photo,
+  resolved_at, created_at`;
+
 export interface ListMissingOptions {
   /** Si es true, incluye también las que ya fueron marcadas como localizadas. */
   includeFound?: boolean;
 }
 
+/**
+ * Devuelve el conjunto completo (usado por el panel de admin para estadísticas).
+ * El listado público usa `listMissingPage`.
+ */
 export async function listMissing(
   options: ListMissingOptions = {},
 ): Promise<MissingPerson[]> {
   const includeFound = Boolean(options.includeFound);
   if (hasDbEnv()) {
     await ensureSchema();
-    const rows = includeFound
-      ? ((await getSql()`
-          SELECT id, name, age, description, last_seen, contact,
-                 (photo IS NOT NULL) AS has_photo,
-                 COALESCE(status, 'active') AS status,
-                 resolution_note,
-                 (resolution_photo IS NOT NULL) AS has_resolution_photo,
-                 resolved_at,
-                 created_at
-          FROM missing_persons
-          ORDER BY created_at DESC
-          LIMIT ${FETCH_LIMIT}
-        `) as Row[])
-      : ((await getSql()`
-          SELECT id, name, age, description, last_seen, contact,
-                 (photo IS NOT NULL) AS has_photo,
-                 COALESCE(status, 'active') AS status,
-                 resolution_note,
-                 (resolution_photo IS NOT NULL) AS has_resolution_photo,
-                 resolved_at,
-                 created_at
-          FROM missing_persons
-          WHERE COALESCE(status, 'active') = 'active'
-          ORDER BY created_at DESC
-          LIMIT ${FETCH_LIMIT}
-        `) as Row[]);
+    const sql = getSql();
+    const where = includeFound ? "" : "WHERE status = 'active'";
+    const rows = (await sql.query(
+      `SELECT ${SELECT_COLS} FROM missing_persons ${where} ORDER BY created_at DESC, id DESC`,
+      [],
+    )) as Row[];
     return rows.map(rowToPerson);
   }
   return [...memoryStore.values()]
     .filter((m) => includeFound || m.status !== "found")
     .map(({ photo: _photo, resolutionPhoto: _rp, ...rest }) => rest)
     .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export type MissingStatusFilter = "active" | "found" | "all";
+
+export interface ListMissingPageParams {
+  status?: MissingStatusFilter;
+  page?: number;
+  pageSize?: number;
+  search?: string;
+}
+
+export interface MissingPageResult {
+  people: MissingPerson[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+function clampInt(
+  value: number | undefined,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
+}
+
+function stripAccents(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+/** Palabras de búsqueda en minúsculas (sin patrones), máx. 8. */
+function searchTerms(search: string | undefined): string[] {
+  return (search ?? "")
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+/**
+ * Listado paginado con búsqueda server-side. Paginación por offset (rápida en
+ * este orden de magnitud) construyendo el WHERE dinámicamente: sin término de
+ * búsqueda no se agrega predicado, de modo que `idx_missing_status_created`
+ * sirve el orden + LIMIT sin ordenar toda la tabla; cada término es un ILIKE
+ * explícito que el índice GIN de trigramas (`idx_missing_search`) puede usar.
+ */
+export async function listMissingPage(
+  params: ListMissingPageParams = {},
+): Promise<MissingPageResult> {
+  const status = params.status ?? "active";
+  const pageSize = clampInt(params.pageSize, 1, MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE);
+  const requestedPage = clampInt(params.page, 1, Number.MAX_SAFE_INTEGER, 1);
+  const rawTerms = searchTerms(params.search);
+
+  if (hasDbEnv()) {
+    await ensureSchema();
+    const sql = getSql();
+
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let n = 1;
+
+    if (status !== "all") {
+      conditions.push(`status = $${n++}`);
+      values.push(status);
+    }
+
+    const fieldExpr = accentSearchReady
+      ? "f_unaccent(name || ' ' || last_seen || ' ' || coalesce(description, ''))"
+      : "lower(name || ' ' || last_seen || ' ' || coalesce(description, ''))";
+    // Con acentos disponibles comparamos contra el texto sin acentos en ambos
+    // lados; en el fallback respetamos el texto crudo (sensible a acentos).
+    const terms = accentSearchReady ? rawTerms.map(stripAccents) : rawTerms;
+    for (const term of terms) {
+      conditions.push(`${fieldExpr} ILIKE $${n++}`);
+      values.push(`%${term}%`);
+    }
+
+    const whereSql = conditions.length
+      ? `WHERE ${conditions.join(" AND ")}`
+      : "";
+    const orderSql =
+      status === "found"
+        ? "COALESCE(resolved_at, created_at) DESC, id DESC"
+        : "created_at DESC, id DESC";
+
+    const countRows = (await sql.query(
+      `SELECT count(*)::int AS n FROM missing_persons ${whereSql}`,
+      values,
+    )) as { n: number }[];
+    const total = countRows[0]?.n ?? 0;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+    const offset = (page - 1) * pageSize;
+
+    const rows = (await sql.query(
+      `SELECT ${SELECT_COLS} FROM missing_persons ${whereSql} ORDER BY ${orderSql} LIMIT $${n} OFFSET $${n + 1}`,
+      [...values, pageSize, offset],
+    )) as Row[];
+
+    return { people: rows.map(rowToPerson), total, page, pageSize, totalPages };
+  }
+
+  // Fallback en memoria (modo demo sin DB). Búsqueda acento-insensitiva.
+  const statuses = status === "all" ? ["active", "found"] : [status];
+  const terms = rawTerms.map(stripAccents);
+  const filtered = [...memoryStore.values()]
+    .filter((m) => statuses.includes(m.status))
+    .filter((m) => {
+      if (terms.length === 0) return true;
+      const hay = stripAccents(`${m.name} ${m.lastSeen} ${m.description}`.toLowerCase());
+      return terms.every((t) => hay.includes(t));
+    })
+    .sort((a, b) =>
+      status === "found"
+        ? (b.resolvedAt ?? b.createdAt) - (a.resolvedAt ?? a.createdAt)
+        : b.createdAt - a.createdAt,
+    )
+    .map(({ photo: _photo, resolutionPhoto: _rp, ...rest }) => rest);
+
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const offset = (page - 1) * pageSize;
+  return {
+    people: filtered.slice(offset, offset + pageSize),
+    total,
+    page,
+    pageSize,
+    totalPages,
+  };
 }
 
 export async function addMissing(
@@ -307,6 +476,11 @@ export interface PhotoData {
   buffer: Buffer;
 }
 
+/** La foto está alojada externamente; el endpoint debe redirigir a esta URL. */
+export interface RemotePhoto {
+  redirectTo: string;
+}
+
 function dataUrlToPhoto(dataUrl: string | null): PhotoData | null {
   if (!dataUrl) return null;
   const match = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/.exec(dataUrl);
@@ -314,19 +488,27 @@ function dataUrlToPhoto(dataUrl: string | null): PhotoData | null {
   return { contentType: match[1], buffer: Buffer.from(match[2], "base64") };
 }
 
-/** Devuelve los bytes de la foto de una persona, o null si no existe. */
-export async function getMissingPhoto(id: string): Promise<PhotoData | null> {
-  let dataUrl: string | null = null;
+/**
+ * Devuelve la foto de una persona. Puede ser un data URL embebido (se sirven
+ * los bytes) o una URL remota (importada de fuentes externas), en cuyo caso se
+ * indica una redirección. Null si no existe.
+ */
+export async function getMissingPhoto(
+  id: string,
+): Promise<PhotoData | RemotePhoto | null> {
+  let stored: string | null = null;
   if (hasDbEnv()) {
     await ensureSchema();
     const rows = (await getSql()`
       SELECT photo FROM missing_persons WHERE id = ${id}
     `) as { photo: string | null }[];
-    dataUrl = rows[0]?.photo ?? null;
+    stored = rows[0]?.photo ?? null;
   } else {
-    dataUrl = memoryStore.get(id)?.photo ?? null;
+    stored = memoryStore.get(id)?.photo ?? null;
   }
-  return dataUrlToPhoto(dataUrl);
+  if (!stored) return null;
+  if (/^https?:\/\//i.test(stored)) return { redirectTo: stored };
+  return dataUrlToPhoto(stored);
 }
 
 /** Foto-prueba que se subió al marcar a la persona como localizada. */
