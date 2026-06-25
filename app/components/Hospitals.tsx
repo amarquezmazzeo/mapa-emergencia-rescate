@@ -4,11 +4,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   FACILITY_TYPE_META,
+  PATIENT_CONDITION_META,
+  PATIENT_STATUS_META,
   PRIORITY_ZONE_META,
   type Hospital,
+  type HospitalPatient,
   type HospitalPriorityZone,
 } from "@/lib/hospitals-meta";
 import HospitalForm, { type HospitalPayload } from "./HospitalForm";
+
+type Tab = "hospitals" | "patients";
+
+interface PatientSearchResult {
+  patient: HospitalPatient;
+  hospital: {
+    id: string;
+    name: string;
+    state: string;
+    municipality: string;
+  };
+}
 
 const ZONE_FILTERS: { value: HospitalPriorityZone | "all"; label: string }[] = [
   { value: "all", label: "Todas" },
@@ -27,6 +42,12 @@ export default function Hospitals() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [tab, setTab] = useState<Tab>("hospitals");
+  const [patientQuery, setPatientQuery] = useState("");
+  const [debouncedPatientQuery, setDebouncedPatientQuery] = useState("");
+  const [patientResults, setPatientResults] = useState<PatientSearchResult[]>([]);
+  const [patientLoading, setPatientLoading] = useState(false);
+  const [patientError, setPatientError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,6 +70,37 @@ export default function Hospitals() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedPatientQuery(patientQuery), 300);
+    return () => clearTimeout(t);
+  }, [patientQuery]);
+
+  useEffect(() => {
+    const q = debouncedPatientQuery.trim();
+    if (q.length < 2) {
+      setPatientResults([]);
+      setPatientError(null);
+      return;
+    }
+    let cancelled = false;
+    setPatientLoading(true);
+    setPatientError(null);
+    fetch(`/api/patients/search?q=${encodeURIComponent(q)}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Error"))))
+      .then((data: { results?: PatientSearchResult[] }) => {
+        if (!cancelled) setPatientResults(data.results ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setPatientError("No se pudo realizar la búsqueda.");
+      })
+      .finally(() => {
+        if (!cancelled) setPatientLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedPatientQuery]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -140,7 +192,80 @@ export default function Hospitals() {
         />
       </div>
 
-      <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div
+        role="tablist"
+        aria-label="Vistas de hospitales"
+        className="mt-5 inline-flex rounded-full border border-slate-200 bg-slate-100 p-1"
+      >
+        <TabButton active={tab === "hospitals"} onClick={() => setTab("hospitals")}>
+          🏥 Hospitales
+        </TabButton>
+        <TabButton active={tab === "patients"} onClick={() => setTab("patients")}>
+          🔎 Buscar paciente
+        </TabButton>
+      </div>
+
+      {tab === "patients" ? (
+        <PatientsSearchView
+          query={patientQuery}
+          onQueryChange={setPatientQuery}
+          results={patientResults}
+          loading={patientLoading}
+          error={patientError}
+        />
+      ) : (
+        <HospitalsListView
+          search={search}
+          setSearch={setSearch}
+          stateFilter={stateFilter}
+          setStateFilter={setStateFilter}
+          zoneFilter={zoneFilter}
+          setZoneFilter={setZoneFilter}
+          states={states}
+          loading={loading}
+          error={error}
+          visible={visible}
+        />
+      )}
+
+      {showAddForm && (
+        <HospitalForm
+          onCancel={() => setShowAddForm(false)}
+          onSubmit={handleAdd}
+        />
+      )}
+    </section>
+  );
+}
+
+interface HospitalsListViewProps {
+  search: string;
+  setSearch: (v: string) => void;
+  stateFilter: string;
+  setStateFilter: (v: string) => void;
+  zoneFilter: HospitalPriorityZone | "all";
+  setZoneFilter: (v: HospitalPriorityZone | "all") => void;
+  states: string[];
+  loading: boolean;
+  error: string | null;
+  visible: Hospital[];
+}
+
+function HospitalsListView({
+  search,
+  setSearch,
+  stateFilter,
+  setStateFilter,
+  zoneFilter,
+  setZoneFilter,
+  states,
+  loading,
+  error,
+  visible,
+}: HospitalsListViewProps) {
+  return (
+    <>
+      <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <input
           type="search"
           value={search}
@@ -209,14 +334,173 @@ export default function Hospitals() {
           </ul>
         )}
       </div>
+    </>
+  );
+}
 
-      {showAddForm && (
-        <HospitalForm
-          onCancel={() => setShowAddForm(false)}
-          onSubmit={handleAdd}
+interface PatientsSearchViewProps {
+  query: string;
+  onQueryChange: (value: string) => void;
+  results: PatientSearchResult[];
+  loading: boolean;
+  error: string | null;
+}
+
+function PatientsSearchView({
+  query,
+  onQueryChange,
+  results,
+  loading,
+  error,
+}: PatientsSearchViewProps) {
+  const trimmed = query.trim();
+  const empty = trimmed.length === 0;
+  const tooShort = !empty && trimmed.length < 2;
+
+  return (
+    <div className="mt-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <label
+          htmlFor="patient-search"
+          className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+        >
+          Buscar paciente por nombre o cédula
+        </label>
+        <input
+          id="patient-search"
+          type="search"
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          placeholder="Ej. Antonella, Yose Palma, 5.199.693…"
+          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base outline-none focus:border-red-400"
+          autoComplete="off"
         />
+        <p className="mt-1 text-[11px] text-slate-500">
+          Busca en todos los hospitales. Para cédulas puedes escribir con o sin
+          puntos.
+        </p>
+      </div>
+
+      <div className="mt-4">
+        {empty ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center">
+            <p className="text-2xl" aria-hidden>
+              🔎
+            </p>
+            <p className="mt-2 text-sm font-medium text-slate-700">
+              Escribe el nombre o la cédula para buscar.
+            </p>
+          </div>
+        ) : tooShort ? (
+          <p className="text-center text-xs text-slate-500">
+            Escribe al menos 2 caracteres.
+          </p>
+        ) : error ? (
+          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+        ) : loading ? (
+          <p className="text-center text-sm text-slate-500">Buscando…</p>
+        ) : results.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center">
+            <p className="text-sm font-medium text-slate-700">
+              No se encontró ningún paciente con “{trimmed}”.
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Verifica el nombre o intenta con la cédula.
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="mb-2 text-xs text-slate-500">
+              {results.length} resultado{results.length === 1 ? "" : "s"}
+            </p>
+            <ul className="space-y-2">
+              {results.map((r) => (
+                <li key={r.patient.id}>
+                  <PatientResultCard result={r} />
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PatientResultCard({ result }: { result: PatientSearchResult }) {
+  const { patient, hospital } = result;
+  const condition = PATIENT_CONDITION_META[patient.condition];
+  const status = PATIENT_STATUS_META[patient.status];
+
+  return (
+    <Link
+      href={`/hospitales/${hospital.id}#paciente-${patient.id}`}
+      prefetch={false}
+      className="block rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-900">
+            {patient.name}
+            {patient.age !== null && (
+              <span className="ml-2 text-xs font-normal text-slate-500">
+                {patient.age} años
+              </span>
+            )}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            <span
+              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
+              style={{ background: status.color }}
+            >
+              {status.label}
+            </span>
+            <span
+              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
+              style={{ background: condition.color }}
+            >
+              {condition.label}
+            </span>
+          </div>
+        </div>
+        <span className="text-xs font-semibold text-red-600">Ver →</span>
+      </div>
+      <p className="mt-2 truncate text-xs text-slate-600">
+        🏥 <span className="font-medium text-slate-800">{hospital.name}</span>
+        {hospital.state && (
+          <span className="text-slate-500"> · {hospital.state}</span>
+        )}
+      </p>
+      {patient.notes && (
+        <p className="mt-1 line-clamp-2 text-xs text-slate-500">{patient.notes}</p>
       )}
-    </section>
+    </Link>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+        active
+          ? "bg-white text-slate-900 shadow-sm"
+          : "text-slate-600 hover:text-slate-900"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

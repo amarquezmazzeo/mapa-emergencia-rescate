@@ -375,6 +375,102 @@ export async function addHospital(input: NewHospital): Promise<Hospital> {
   return hospital;
 }
 
+export interface PatientSearchResult {
+  patient: HospitalPatient;
+  hospital: {
+    id: string;
+    name: string;
+    state: string;
+    municipality: string;
+  };
+}
+
+/**
+ * Búsqueda global de pacientes por nombre, cédula (en notas) o contacto.
+ * Devuelve cada resultado con su hospital para el enlace cruzado.
+ */
+export async function searchPatients(
+  query: string,
+  limit: number = 50,
+): Promise<PatientSearchResult[]> {
+  const q = (query ?? "").trim();
+  if (!q || q.length < 2) return [];
+  const cleanLimit = Math.min(Math.max(limit, 1), 200);
+
+  if (hasDbEnv()) {
+    await ensureSchema();
+    const like = `%${q.toLowerCase()}%`;
+    // Para cédulas el usuario puede escribir con o sin puntos: comparo también
+    // contra una versión "limpia" (sólo dígitos) de las notas.
+    const digits = q.replace(/[^0-9]/g, "");
+    const digitsLike = digits.length >= 4 ? `%${digits}%` : null;
+
+    const rows = (await getSql().query(
+      `
+      SELECT
+        p.id, p.hospital_id, p.name, p.age, p.condition, p.status,
+        p.notes, p.contact, p.admitted_at, p.updated_at,
+        h.name AS hospital_name,
+        h.state AS hospital_state,
+        h.municipality AS hospital_municipality
+      FROM hospital_patients p
+      INNER JOIN hospitals h ON h.id = p.hospital_id
+      WHERE
+        LOWER(p.name) LIKE $1
+        OR LOWER(p.notes) LIKE $1
+        OR LOWER(p.contact) LIKE $1
+        OR ($2::text IS NOT NULL
+            AND REGEXP_REPLACE(p.notes, '[^0-9]', '', 'g') LIKE $2)
+      ORDER BY
+        CASE WHEN LOWER(p.name) LIKE $1 THEN 0 ELSE 1 END,
+        p.admitted_at DESC
+      LIMIT $3
+      `,
+      [like, digitsLike, cleanLimit],
+    )) as (PatientRow & {
+      hospital_name: string;
+      hospital_state: string;
+      hospital_municipality: string;
+    })[];
+
+    return rows.map((r) => ({
+      patient: rowToPatient(r),
+      hospital: {
+        id: r.hospital_id,
+        name: r.hospital_name,
+        state: r.hospital_state,
+        municipality: r.hospital_municipality,
+      },
+    }));
+  }
+
+  const ql = q.toLowerCase();
+  const digits = q.replace(/[^0-9]/g, "");
+  const list: PatientSearchResult[] = [];
+  for (const p of memoryPatients.values()) {
+    const cleanNotes = p.notes.replace(/[^0-9]/g, "");
+    const matches =
+      p.name.toLowerCase().includes(ql) ||
+      p.notes.toLowerCase().includes(ql) ||
+      p.contact.toLowerCase().includes(ql) ||
+      (digits.length >= 4 && cleanNotes.includes(digits));
+    if (!matches) continue;
+    const h = memoryHospitals.get(p.hospitalId);
+    if (!h) continue;
+    list.push({
+      patient: p,
+      hospital: {
+        id: h.id,
+        name: h.name,
+        state: h.state,
+        municipality: h.municipality,
+      },
+    });
+  }
+  list.sort((a, b) => b.patient.admittedAt - a.patient.admittedAt);
+  return list.slice(0, cleanLimit);
+}
+
 export async function listPatients(hospitalId: string): Promise<HospitalPatient[]> {
   if (hasDbEnv()) {
     await ensureSchema();

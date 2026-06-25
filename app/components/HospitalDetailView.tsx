@@ -183,7 +183,8 @@ export default function HospitalDetailView({
               return (
                 <li
                   key={p.id}
-                  className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300"
+                  id={`paciente-${p.id}`}
+                  className="scroll-mt-24 rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition target:border-red-400 target:bg-red-50 hover:border-slate-300"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
