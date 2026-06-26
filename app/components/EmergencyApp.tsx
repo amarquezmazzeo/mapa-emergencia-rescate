@@ -83,13 +83,16 @@ type SubmitOutcome =
  * muestra, se encola para reintento, o se descarta. */
 async function postReportToServer(
   payload: QueuedPayload,
+  opts?: { fromQueue?: boolean },
 ): Promise<SubmitOutcome> {
   let res: Response;
   try {
     res = await fetch("/api/reports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      // `queued` marca los reportes que se reenvían desde la cola offline para
+      // que el servidor no los rechace por un token de Turnstile caducado.
+      body: JSON.stringify({ ...payload, queued: opts?.fromQueue === true }),
     });
   } catch {
     // Red caída: no llegó al servidor.
@@ -288,7 +291,9 @@ export default function EmergencyApp() {
     try {
       const pending = await listPending();
       for (const item of pending) {
-        const outcome = await postReportToServer(item.payload);
+        const outcome = await postReportToServer(item.payload, {
+          fromQueue: true,
+        });
         if (outcome.status === "ok") {
           await removePending(item.localId);
           if (outcome.report) {
@@ -374,6 +379,7 @@ export default function EmergencyApp() {
       affected: number;
       needs: string;
       photo: string | null;
+      turnstileToken: string | null;
     }) => {
       if (!draft) return;
 

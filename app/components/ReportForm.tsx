@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { REPORT_TYPES, REPORT_TYPE_KEYS, type ReportType } from "@/lib/types";
 import { trackEvent } from "./openpanel";
 
@@ -14,7 +14,57 @@ interface ReportFormProps {
     affected: number;
     needs: string;
     photo: string | null;
+    turnstileToken: string | null;
   }) => Promise<void>;
+}
+
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+
+interface TurnstileRenderOptions {
+  sitekey: string;
+  callback?: (token: string) => void;
+  "error-callback"?: () => void;
+  "expired-callback"?: () => void;
+  "timeout-callback"?: () => void;
+  theme?: "light" | "dark" | "auto";
+  size?: "normal" | "flexible" | "compact";
+}
+
+interface TurnstileApi {
+  render: (el: HTMLElement, opts: TurnstileRenderOptions) => string;
+  remove: (id: string) => void;
+  reset: (id?: string) => void;
+}
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
+
+let turnstileScriptPromise: Promise<void> | null = null;
+
+/** Carga el script de Turnstile una sola vez, bajo demanda. */
+function loadTurnstile(): Promise<void> {
+  if (typeof window === "undefined")
+    return Promise.reject(new Error("sin window"));
+  if (window.turnstile) return Promise.resolve();
+  if (!turnstileScriptPromise) {
+    turnstileScriptPromise = new Promise<void>((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src =
+        "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve();
+      script.onerror = () => {
+        turnstileScriptPromise = null;
+        reject(new Error("No se pudo cargar Turnstile"));
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return turnstileScriptPromise;
 }
 
 type FieldCopy = {
@@ -109,6 +159,87 @@ export default function ReportForm({
   const [geoError, setGeoError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Verificación antirrobots (Cloudflare Turnstile). Solo se activa si hay
+  // clave pública configurada; sin ella el formulario funciona como antes.
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileError, setTurnstileError] = useState(false);
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
+  const turnstileRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetId = useRef<string | null>(null);
+
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return;
+    let cancelled = false;
+    loadTurnstile()
+      .then(() => {
+        if (cancelled || !turnstileRef.current || !window.turnstile) return;
+        if (turnstileWidgetId.current) return;
+        turnstileWidgetId.current = window.turnstile.render(
+          turnstileRef.current,
+          {
+            sitekey: TURNSTILE_SITE_KEY,
+            callback: (t) => {
+              setTurnstileToken(t);
+              setTurnstileError(false);
+            },
+            "error-callback": () => {
+              setTurnstileToken(null);
+              setTurnstileError(true);
+            },
+            "expired-callback": () => setTurnstileToken(null),
+            "timeout-callback": () => setTurnstileToken(null),
+          },
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setTurnstileError(true);
+      });
+    return () => {
+      cancelled = true;
+      if (turnstileWidgetId.current && window.turnstile) {
+        try {
+          window.turnstile.remove(turnstileWidgetId.current);
+        } catch {
+          /* el widget ya no existe */
+        }
+        turnstileWidgetId.current = null;
+      }
+    };
+  }, []);
+
+  const resetTurnstile = useCallback(() => {
+    setTurnstileToken(null);
+    if (turnstileWidgetId.current && window.turnstile) {
+      try {
+        window.turnstile.reset(turnstileWidgetId.current);
+      } catch {
+        /* el widget ya no existe */
+      }
+    }
+  }, []);
+
+  // Turnstile bloquea el envío solo cuando está configurado, hay conexión y el
+  // widget cargó bien. Sin conexión o si el widget falla, dejamos enviar: el
+  // reporte se encola y se acepta al reintentar para no perderlo.
+  const turnstileBlocking =
+    Boolean(TURNSTILE_SITE_KEY) &&
+    online &&
+    !turnstileError &&
+    !turnstileToken;
+
   const useMyLocation = useCallback(() => {
     trackEvent("report_use_geolocation");
     if (!("geolocation" in navigator)) {
@@ -175,6 +306,7 @@ export default function ReportForm({
         affected: copy.showAffected ? Number(affected) || 0 : 0,
         needs: needs.trim(),
         photo,
+        turnstileToken,
       });
       trackEvent("report_created", {
         reportType: type,
@@ -185,6 +317,9 @@ export default function ReportForm({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al publicar.");
       setSubmitting(false);
+      // El token de Turnstile es de un solo uso: pedimos uno nuevo por si el
+      // usuario vuelve a intentar.
+      resetTurnstile();
     }
   }
 
@@ -397,6 +532,18 @@ export default function ReportForm({
             </div>
           </div>
 
+          {TURNSTILE_SITE_KEY && (
+            <div>
+              <div ref={turnstileRef} className="min-h-[65px]" />
+              {turnstileError && (
+                <p className="mt-1 text-xs text-amber-700">
+                  No se pudo cargar la verificación antirrobots. Si tienes
+                  conexión, recarga la página; tu reporte no se perderá.
+                </p>
+              )}
+            </div>
+          )}
+
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
@@ -413,10 +560,14 @@ export default function ReportForm({
             </button>
             <button
               type="submit"
-              disabled={submitting || processingPhoto}
+              disabled={submitting || processingPhoto || turnstileBlocking}
               className="flex-1 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
             >
-              {submitting ? "Publicando…" : "Publicar Alerta"}
+              {submitting
+                ? "Publicando…"
+                : turnstileBlocking
+                  ? "Verificando…"
+                  : "Publicar Alerta"}
             </button>
           </div>
         </form>

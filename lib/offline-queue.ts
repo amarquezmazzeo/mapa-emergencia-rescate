@@ -22,6 +22,10 @@ export interface QueuedPayload {
   affected: number;
   needs: string;
   photo: string | null;
+  // Token de Cloudflare Turnstile obtenido al componer el reporte. Puede faltar
+  // (sin conexión) o caducar antes de reenviarse desde la cola; el servidor
+  // acepta reportes encolados en ese caso para no perderlos.
+  turnstileToken?: string | null;
 }
 
 export interface QueuedReport {

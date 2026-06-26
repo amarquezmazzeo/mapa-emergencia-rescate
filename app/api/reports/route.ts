@@ -6,7 +6,15 @@ import {
   MAX_REPORT_PHOTO_CHARS,
 } from "@/lib/store";
 import { checkRateLimit, clientIp } from "@/lib/ratelimit";
+import { verifyTurnstile } from "@/lib/turnstile";
 import { REPORT_TYPE_KEYS, type NewReport, type ReportType } from "@/lib/types";
+
+// El cuerpo incluye, además de los campos del reporte, el token de Turnstile y
+// una marca opcional para reportes reenviados desde la cola offline.
+type ReportRequestBody = Partial<NewReport> & {
+  turnstileToken?: unknown;
+  queued?: unknown;
+};
 
 export const dynamic = "force-dynamic";
 
@@ -34,11 +42,29 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: Partial<NewReport>;
+  let body: ReportRequestBody;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
+  }
+
+  // Verificación antirrobots con Cloudflare Turnstile (si está configurada).
+  // Los reportes que vienen de la cola offline (`queued`) se aceptan aunque su
+  // token haya caducado o falte: se compusieron sin conexión y no deben
+  // perderse. En ese caso la protección de respaldo es el límite por IP.
+  const turnstileToken =
+    typeof body.turnstileToken === "string" ? body.turnstileToken : null;
+  const fromQueue = body.queued === true;
+  const turnstile = await verifyTurnstile(turnstileToken, clientIp(request));
+  if (turnstile === "failed" && !fromQueue) {
+    return NextResponse.json(
+      {
+        error:
+          "No pudimos verificar que no eres un robot. Recarga la página e inténtalo de nuevo.",
+      },
+      { status: 403 },
+    );
   }
 
   const lat = Number(body.lat);
