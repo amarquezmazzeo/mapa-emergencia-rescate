@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Turnstile,
+  type TurnstileInstance,
+} from "@marsidev/react-turnstile";
 import { REPORT_TYPES, REPORT_TYPE_KEYS, type ReportType } from "@/lib/types";
 import { trackEvent } from "./openpanel";
 
@@ -19,53 +23,6 @@ interface ReportFormProps {
 }
 
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
-
-interface TurnstileRenderOptions {
-  sitekey: string;
-  callback?: (token: string) => void;
-  "error-callback"?: () => void;
-  "expired-callback"?: () => void;
-  "timeout-callback"?: () => void;
-  theme?: "light" | "dark" | "auto";
-  size?: "normal" | "flexible" | "compact";
-}
-
-interface TurnstileApi {
-  render: (el: HTMLElement, opts: TurnstileRenderOptions) => string;
-  remove: (id: string) => void;
-  reset: (id?: string) => void;
-}
-
-declare global {
-  interface Window {
-    turnstile?: TurnstileApi;
-  }
-}
-
-let turnstileScriptPromise: Promise<void> | null = null;
-
-/** Carga el script de Turnstile una sola vez, bajo demanda. */
-function loadTurnstile(): Promise<void> {
-  if (typeof window === "undefined")
-    return Promise.reject(new Error("sin window"));
-  if (window.turnstile) return Promise.resolve();
-  if (!turnstileScriptPromise) {
-    turnstileScriptPromise = new Promise<void>((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src =
-        "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-      script.async = true;
-      script.defer = true;
-      script.onload = () => resolve();
-      script.onerror = () => {
-        turnstileScriptPromise = null;
-        reject(new Error("No se pudo cargar Turnstile"));
-      };
-      document.head.appendChild(script);
-    });
-  }
-  return turnstileScriptPromise;
-}
 
 type FieldCopy = {
   placeLabel: string;
@@ -166,8 +123,7 @@ export default function ReportForm({
   const [online, setOnline] = useState(() =>
     typeof navigator === "undefined" ? true : navigator.onLine,
   );
-  const turnstileRef = useRef<HTMLDivElement>(null);
-  const turnstileWidgetId = useRef<string | null>(null);
+  const turnstileRef = useRef<TurnstileInstance | null>(null);
 
   useEffect(() => {
     const goOnline = () => setOnline(true);
@@ -180,55 +136,9 @@ export default function ReportForm({
     };
   }, []);
 
-  useEffect(() => {
-    if (!TURNSTILE_SITE_KEY) return;
-    let cancelled = false;
-    loadTurnstile()
-      .then(() => {
-        if (cancelled || !turnstileRef.current || !window.turnstile) return;
-        if (turnstileWidgetId.current) return;
-        turnstileWidgetId.current = window.turnstile.render(
-          turnstileRef.current,
-          {
-            sitekey: TURNSTILE_SITE_KEY,
-            callback: (t) => {
-              setTurnstileToken(t);
-              setTurnstileError(false);
-            },
-            "error-callback": () => {
-              setTurnstileToken(null);
-              setTurnstileError(true);
-            },
-            "expired-callback": () => setTurnstileToken(null),
-            "timeout-callback": () => setTurnstileToken(null),
-          },
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setTurnstileError(true);
-      });
-    return () => {
-      cancelled = true;
-      if (turnstileWidgetId.current && window.turnstile) {
-        try {
-          window.turnstile.remove(turnstileWidgetId.current);
-        } catch {
-          /* el widget ya no existe */
-        }
-        turnstileWidgetId.current = null;
-      }
-    };
-  }, []);
-
   const resetTurnstile = useCallback(() => {
     setTurnstileToken(null);
-    if (turnstileWidgetId.current && window.turnstile) {
-      try {
-        window.turnstile.reset(turnstileWidgetId.current);
-      } catch {
-        /* el widget ya no existe */
-      }
-    }
+    turnstileRef.current?.reset();
   }, []);
 
   // Turnstile bloquea el envío solo cuando está configurado, hay conexión y el
@@ -534,7 +444,21 @@ export default function ReportForm({
 
           {TURNSTILE_SITE_KEY && (
             <div>
-              <div ref={turnstileRef} className="min-h-[65px]" />
+              <Turnstile
+                ref={turnstileRef}
+                siteKey={TURNSTILE_SITE_KEY}
+                options={{ size: "flexible" }}
+                onSuccess={(token) => {
+                  setTurnstileToken(token);
+                  setTurnstileError(false);
+                }}
+                onError={() => {
+                  setTurnstileToken(null);
+                  setTurnstileError(true);
+                }}
+                onExpire={() => setTurnstileToken(null)}
+                onTimeout={() => setTurnstileToken(null)}
+              />
               {turnstileError && (
                 <p className="mt-1 text-xs text-amber-700">
                   No se pudo cargar la verificación antirrobots. Si tienes

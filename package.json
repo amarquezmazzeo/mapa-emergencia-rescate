@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@marsidev/react-turnstile": "^1.5.3",
     "@neondatabase/serverless": "^1.1.0",
     "@next/third-parties": "^16.2.9",
     "@openpanel/nextjs": "^1.5.1",
