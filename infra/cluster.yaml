@@ -27,6 +27,11 @@ networking:
     use_agent: false
     public_key_path: "~/.ssh/mapa_k3s.pub"
     private_key_path: "~/.ssh/mapa_k3s"
+    # Reference the SSH key OpenTofu already created (named "mapa-key") instead
+    # of letting hetzner-k3s create its own "mapa" key — Hetzner blocks dup
+    # fingerprints, so without this the autoscaler aborts. hetzner-k3s will NOT
+    # delete this key on cluster teardown (OpenTofu owns it).
+    existing_ssh_key_name: "mapa-key"
   allowed_networks:
     # Who may reach the k8s API / SSH. Tighten to your admin IP(s) in prod.
     ssh:
