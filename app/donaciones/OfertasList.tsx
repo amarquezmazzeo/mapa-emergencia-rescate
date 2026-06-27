@@ -241,9 +241,8 @@ export default function OfertasList() {
 
   const categories = OFERTAS.map((group) => group.category);
 
-  // El React Compiler (Next 16) memoiza esto automáticamente; un useMemo manual
-  // dispara react-hooks/preserve-manual-memoization. Lo dejamos como cálculo
-  // directo.
+  // Lista estática y pequeña: filtrar en cada render es trivial y deja que el
+  // React Compiler maneje la memoización (evita preserve-manual-memoization).
   const q = query.trim().toLowerCase();
   const groups = OFERTAS.filter(
     (group) => !activeCategory || group.category === activeCategory,
