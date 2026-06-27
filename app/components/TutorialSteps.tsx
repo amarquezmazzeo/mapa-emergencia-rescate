@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { REPORT_TYPES, type ReportType } from "@/lib/types";
 import { AlertTriangle, BookOpen, Heart, Home, ChevronRight } from "lucide-react";
 
 export default function TutorialSteps() {
@@ -150,59 +149,6 @@ export default function TutorialSteps() {
             </div>
             <ChevronRight size={14} className="text-[var(--etext3)]" strokeWidth={2.5} />
           </a>
-        </div>
-
-        <div className="e-card mt-6 p-5">
-          <h3 className="qi-h4">🏷️ Tipos de marcador disponibles</h3>
-          <p className="mt-1 text-xs text-[var(--etext2)]">
-            Elige el que mejor describa la situación. Cada color e icono se
-            verá en el mapa.
-          </p>
-          <div className="e-htypes mt-3">
-            {(Object.keys(REPORT_TYPES) as ReportType[]).map((type) => {
-              const meta = REPORT_TYPES[type];
-              return (
-                <div
-                  key={type}
-                  className="flex items-center gap-2 rounded-xl border border-[var(--eborder)] bg-[var(--einput)] p-2"
-                >
-                  <span
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-base text-white shadow-sm"
-                    style={{ background: meta.color }}
-                    aria-hidden
-                  >
-                    {meta.icon}
-                  </span>
-                  <span className="text-xs font-semibold text-[var(--etext)]">
-                    {meta.label}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-sm font-semibold text-emerald-900">
-              ✅ Antes de publicar
-            </p>
-            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-emerald-900">
-              <li>Asegúrate de que la ubicación esté correcta.</li>
-              <li>Indica claramente qué tipo de ayuda se necesita.</li>
-              <li>Si tienes una foto del lugar, súbela.</li>
-            </ul>
-          </div>
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-            <p className="text-sm font-semibold text-amber-900">
-              ⚠️ Evita confundir el mapa
-            </p>
-            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-amber-900">
-              <li>No envíes reportes falsos ni duplicados.</li>
-              <li>Si ya hay un punto similar cerca, no lo repitas.</li>
-              <li>Avisa cuando una emergencia ya fue atendida.</li>
-            </ul>
-          </div>
         </div>
       </div>
     </section>

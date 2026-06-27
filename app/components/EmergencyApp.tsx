@@ -797,7 +797,7 @@ export default function EmergencyApp() {
 							<button
 								type="button"
 								onClick={startReport}
-								className="shrink-0 rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+								className="shrink-0 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
 							>
 								+ Reportar
 							</button>

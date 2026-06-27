@@ -534,7 +534,9 @@ function PersonasPreview() {
         style={{
           gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
           ...(gridCols === 3
-            ? { gridTemplateRows: `repeat(${PERSON_PREVIEW_ROWS}, 13.25rem)` }
+            ? {
+                gridTemplateRows: `repeat(${PERSON_PREVIEW_ROWS}, var(--e-person-card-height))`,
+              }
             : {}),
         }}
         role="list"
