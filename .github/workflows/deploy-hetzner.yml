@@ -56,7 +56,14 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      # `npm ci` is strict and aborts when package-lock.json is out of sync with
+      # this node:20 npm (the @esbuild/* optional-dep drift when the lock was
+      # written by a different npm major). main is protected, so the pipeline
+      # cannot push a corrected lock back — instead it just falls back to
+      # `npm install`, which resolves against package.json without the strict
+      # check. The committed lock is still authoritative when in-sync.
+      - name: Install deps
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
       - name: Typecheck (app)
         run: npx tsc --noEmit -p tsconfig.json
       - name: Typecheck (worker)

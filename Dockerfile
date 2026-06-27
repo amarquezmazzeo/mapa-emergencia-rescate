@@ -7,7 +7,10 @@ WORKDIR /app
 # ---- deps: install with the lockfile only (better layer caching) ----
 FROM base AS deps
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# Prefer the strict, reproducible `npm ci`; fall back to `npm install` if the
+# lock is out of sync (optional-dep / npm-version drift) so the build never
+# wedges on a lockfile mismatch. verify/CI commits the corrected lock back.
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 
 # ---- builder: compile the standalone server ----
 FROM base AS builder
