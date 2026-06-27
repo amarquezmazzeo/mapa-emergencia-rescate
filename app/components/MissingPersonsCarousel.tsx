@@ -47,7 +47,7 @@ type DirectoryTab = "personas" | "hospitales";
 
 const POLL_INTERVAL_MS = 8000;
 const LOW_BANDWIDTH_POLL_INTERVAL_MS = 45_000;
-const GRID_PAGE_SIZE = 16;
+const PERSON_PREVIEW_ROWS = 3;
 const HOSPITAL_PREVIEW_ROWS = 4;
 const MIN_SEARCH_LEN = 3;
 
@@ -90,7 +90,8 @@ function tabFromHash(hash: string): DirectoryTab | null {
     id === "personas" ||
     id === "desaparecidas" ||
     id === "desaparecidas-preview" ||
-    id === "e-directory"
+    id === "e-directory" ||
+    id === "localizados"
   ) {
     return "personas";
   }
@@ -98,7 +99,7 @@ function tabFromHash(hash: string): DirectoryTab | null {
 }
 
 function hashForTab(tab: DirectoryTab): string {
-  return tab === "hospitales" ? "#hospitales" : "#desaparecidas-preview";
+  return tab === "hospitales" ? "#hospitales" : "#e-directory";
 }
 
 function useHorizontalScroll(itemCount: number) {
@@ -280,6 +281,8 @@ function PersonasPreview() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const gridRef = useRef<HTMLDivElement>(null);
   const skipScrollRef = useRef(true);
+  const gridCols = useHospitalGridColumns();
+  const pageSize = gridCols * PERSON_PREVIEW_ROWS;
   const network = useLowBandwidthMode(
     POLL_INTERVAL_MS,
     LOW_BANDWIDTH_POLL_INTERVAL_MS,
@@ -298,7 +301,7 @@ function PersonasPreview() {
       const params = new URLSearchParams({
         status: "active",
         page: String(page),
-        pageSize: String(GRID_PAGE_SIZE),
+        pageSize: String(pageSize),
       });
       if (debouncedQuery.trim().length >= MIN_SEARCH_LEN) {
         params.set("q", debouncedQuery.trim());
@@ -315,7 +318,15 @@ function PersonasPreview() {
     } catch {
       // se reintentará en el próximo ciclo
     }
-  }, [debouncedQuery, page]);
+  }, [debouncedQuery, page, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize, debouncedQuery]);
+
+  useEffect(() => {
+    setPage((p) => Math.min(p, Math.max(1, totalPages)));
+  }, [totalPages]);
 
   const fetchFoundTotal = useCallback(async () => {
     try {
@@ -390,14 +401,14 @@ function PersonasPreview() {
         setPeople((prev) =>
           prev.some((p) => p.id === data.person.id)
             ? prev
-            : [data.person, ...prev].slice(0, GRID_PAGE_SIZE),
+            : [data.person, ...prev].slice(0, pageSize),
         );
         setTotal((t) => t + 1);
       } else {
         fetchPeople();
       }
     },
-    [fetchPeople],
+    [fetchPeople, pageSize],
   );
 
   const handleMarkFound = useCallback(
@@ -493,7 +504,17 @@ function PersonasPreview() {
         )}
       </div>
 
-      <div ref={gridRef} className="e-person-grid" role="list">
+      <div
+        ref={gridRef}
+        className="e-person-grid"
+        style={{
+          gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
+          ...(gridCols === 3
+            ? { gridTemplateRows: `repeat(${PERSON_PREVIEW_ROWS}, 13.25rem)` }
+            : {}),
+        }}
+        role="list"
+      >
         {people.length === 0 ? (
           <div
             className="e-card col-span-full flex flex-col items-center justify-center gap-1 border-dashed p-8 text-center text-[var(--etext2)]"
