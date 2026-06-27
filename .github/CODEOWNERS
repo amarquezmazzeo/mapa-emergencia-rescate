@@ -1,0 +1,7 @@
+# Code owners — su review es OBLIGATORIA para mergear a `main`.
+# El ruleset "proteger main" exige 1 aprobación de un code owner.
+# Cualquiera de estos usuarios puede aprobar (todos son owners de todo el repo).
+#
+# Docs: https://docs.github.com/en/repositories/managing-your-repos-settings-and-features/customizing-your-repository/about-code-owners
+
+* @osmarbetancourt @ArturoRiosMock @takove
