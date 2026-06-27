@@ -25,6 +25,7 @@ on:
           - plan-infra      # tofu plan only — REVIEW infra changes, apply nothing
           - provision       # tofu apply (DB+Valkey+net) + create k3s cluster + roll app
           - recreate-master # REPLACE the k3s master (re-runs cloud-init) + provision flow
+          - migrate         # enqueue the Neon->Hetzner data + images->R2 migration Job
       target:
         description: "Environment (LB TLS profile)"
         type: choice
@@ -67,7 +68,10 @@ jobs:
       #    Runs for all three: plan (prove build), deploy (roll it), provision
       #    (provision rolls the app too, end-to-end).
       # ---------------------------------------------------------------
+      # Build steps are skipped for `migrate` (no new image — it reuses the last
+      # deploy's worker image via :latest) and for `plan-infra` (infra only).
       - name: Log in to GHCR
+        if: ${{ inputs.what != 'migrate' && inputs.what != 'plan-infra' }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -77,9 +81,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Buildx
+        if: ${{ inputs.what != 'migrate' && inputs.what != 'plan-infra' }}
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
+        if: ${{ inputs.what != 'migrate' && inputs.what != 'plan-infra' }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -93,6 +99,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Worker image (BullMQ migration workers) — the `worker` Dockerfile target.
+      # Separate repo tag (<image>-worker) so the app image stays slim. Same SHA.
+      - name: Build and push worker image
+        if: ${{ inputs.what != 'migrate' && inputs.what != 'plan-infra' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          push: true
+          tags: |
+            ${{ env.IMAGE }}-worker:${{ github.sha }}
+            ${{ env.IMAGE }}-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Plan stops here
         if: ${{ inputs.what == 'plan' }}
         run: |
@@ -103,7 +124,7 @@ jobs:
       # 2. (deploy only) Ensure cluster, then roll.
       # ---------------------------------------------------------------
       - name: Install kubectl + tofu
-        if: ${{ inputs.what == 'deploy' || inputs.what == 'provision' || inputs.what == 'plan-infra' || inputs.what == 'recreate-master' }}
+        if: ${{ inputs.what == 'deploy' || inputs.what == 'provision' || inputs.what == 'plan-infra' || inputs.what == 'recreate-master' || inputs.what == 'migrate' }}
         run: |
           # kubectl
           curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
@@ -236,9 +257,9 @@ jobs:
           echo "::notice::Cluster ready. Save KUBECONFIG secret for future deploys: base64 -w0 the kubeconfig (see job artifacts/notes)."
           kubectl get nodes -o wide
 
-      # --- deploy: use the KUBECONFIG secret (set once after the first provision).
+      # --- deploy/migrate: use the KUBECONFIG secret (set once after provision).
       - name: Configure kubectl (deploy)
-        if: ${{ inputs.what == 'deploy' }}
+        if: ${{ inputs.what == 'deploy' || inputs.what == 'migrate' }}
         env:
           KUBECONFIG_B64: ${{ secrets.KUBECONFIG }}
         run: |
@@ -280,6 +301,35 @@ jobs:
             --from-literal=VALKEY_URL="$VK_URL" \
             --from-literal=DB_DRIVER=tcp \
             --from-literal=TRUSTED_IP_HEADER=x-forwarded-for \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # migrate-env: extra secret the migration worker/enqueue Job need on top of
+      # app-env (which already has DATABASE_URL + VALKEY_URL). Sourced from GitHub
+      # secrets (not tofu). No-op if R2/Neon secrets aren't set yet.
+      - name: Create migrate-env secret
+        if: ${{ inputs.what == 'deploy' || inputs.what == 'provision' || inputs.what == 'recreate-master' }}
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_STATIC_BUCKET: ${{ secrets.R2_STATIC_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+        run: |
+          set -euo pipefail
+          [ -f "$HOME/.kube/config" ] || { echo "No kubeconfig — skipping migrate-env."; exit 0; }
+          if [ -z "${NEON_DATABASE_URL:-}" ] || [ -z "${R2_ENDPOINT:-}" ]; then
+            echo "Neon/R2 secrets unset — skipping migrate-env (migration not wired yet)."
+            exit 0
+          fi
+          kubectl create namespace mapa --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n mapa create secret generic migrate-env \
+            --from-literal=NEON_DATABASE_URL="$NEON_DATABASE_URL" \
+            --from-literal=R2_ENDPOINT="$R2_ENDPOINT" \
+            --from-literal=R2_STATIC_BUCKET="$R2_STATIC_BUCKET" \
+            --from-literal=R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
+            --from-literal=R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
+            --from-literal=R2_PUBLIC_BASE="$R2_PUBLIC_BASE" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       # Upload the freshly-built /_next/static to the R2 CDN bucket BEFORE rolling
@@ -356,6 +406,14 @@ jobs:
 
           kubectl apply -f /tmp/service.rendered.yaml
           kubectl apply -f infra/k8s/deployment.yaml
+          # Migration worker Deployment (only if migrate-env exists — i.e. R2/Neon
+          # wired). Patch the placeholder image to the worker image we just built.
+          if kubectl -n mapa get secret migrate-env >/dev/null 2>&1; then
+            sed "s#ghcr.io/OWNER/REPO-worker:latest#${{ env.IMAGE }}-worker:${{ github.sha }}#" \
+              infra/k8s/worker-deployment.yaml | kubectl apply -f -
+          else
+            echo "migrate-env not present — skipping worker Deployment."
+          fi
 
       - name: Roll to the new image (zero-downtime)
         if: ${{ inputs.what == 'deploy' || inputs.what == 'provision' || inputs.what == 'recreate-master' }}
@@ -367,6 +425,37 @@ jobs:
           # Blocks until new pods are Ready (passed /api/readyz) and old pods
           # drained. Fails the job (and the deploy) if the roll stalls.
           kubectl -n mapa rollout status deployment/app --timeout=300s
+          # Roll the migration worker too (if deployed). Not traffic-serving, so a
+          # short timeout is fine; don't fail the whole deploy if it lags.
+          if kubectl -n mapa get deploy migrate-worker >/dev/null 2>&1; then
+            kubectl -n mapa set image deployment/migrate-worker \
+              worker=${{ env.IMAGE }}-worker:${{ github.sha }}
+            kubectl -n mapa rollout status deployment/migrate-worker --timeout=180s || \
+              echo "::warning::migrate-worker roll lagging — check kubectl -n mapa get pods"
+          fi
+
+      # --- migrate: enqueue the Neon->Hetzner data + images->R2 migration. The
+      #     migrate-worker Deployment (already running from a prior deploy) drains
+      #     the queue. Re-runnable: deterministic jobIds + photo_migrated_at make
+      #     it idempotent, so fire this again to pull new syncs / pending photos.
+      - name: Enqueue migration
+        if: ${{ inputs.what == 'migrate' }}
+        run: |
+          set -euo pipefail
+          [ -f "$HOME/.kube/config" ] || { echo "::error::No kubeconfig (KUBECONFIG secret). Run provision first."; exit 1; }
+          if ! kubectl -n mapa get deploy migrate-worker >/dev/null 2>&1; then
+            echo "::error::migrate-worker not deployed — run 'deploy' first (it applies the worker)."; exit 1
+          fi
+          # Fresh run: clear any prior Job, then apply with the real worker image.
+          kubectl -n mapa delete job migrate-enqueue --ignore-not-found
+          # Reuse the worker image from the last deploy (:latest) — migrate builds
+          # nothing, so the per-sha tag may not exist at this commit.
+          sed "s#ghcr.io/OWNER/REPO-worker:latest#${{ env.IMAGE }}-worker:latest#" \
+            infra/k8s/migrate-enqueue-job.yaml | kubectl apply -f -
+          echo "Enqueue Job submitted. Tailing producer logs (Ctrl-C-safe; the Job runs on)..."
+          kubectl -n mapa wait --for=condition=ready pod -l app=migrate-enqueue --timeout=120s || true
+          kubectl -n mapa logs -f job/migrate-enqueue --tail=-1 || true
+          echo "::notice::Producer finished enqueuing. Watch workers drain: kubectl -n mapa logs -f deploy/migrate-worker"
 
       - name: Rollback hint on failure
         if: ${{ failure() && inputs.what == 'deploy' }}

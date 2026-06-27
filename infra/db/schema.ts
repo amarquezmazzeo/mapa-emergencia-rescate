@@ -47,8 +47,19 @@ export const reports = pgTable(
     photo: text("photo"),
     confirmations: integer("confirmations").notNull().default(0),
     createdAt: epochMs("created_at").notNull(),
+    // Set when this row's `photo` has been moved off the DB (base64) / external
+    // host and onto R2. NULL = not yet migrated. Lets the image-rehost worker
+    // claim only un-migrated rows (FOR UPDATE SKIP LOCKED) and be re-runnable.
+    photoMigratedAt: epochMs("photo_migrated_at"),
   },
-  (t) => [index("idx_reports_created_at").on(t.createdAt.desc())],
+  (t) => [
+    index("idx_reports_created_at").on(t.createdAt.desc()),
+    // Partial index: cheap scan for the rehost worker's "WHERE photo_migrated_at
+    // IS NULL AND photo IS NOT NULL" claim query.
+    index("idx_reports_photo_pending")
+      .on(t.id)
+      .where(sql`photo_migrated_at IS NULL AND photo IS NOT NULL`),
+  ],
 );
 
 export const reportConfirmations = pgTable(
@@ -83,10 +94,18 @@ export const missingPersons = pgTable(
     lat: doublePrecision("lat"),
     lng: doublePrecision("lng"),
     createdAt: epochMs("created_at").notNull(),
+    // See reports.photoMigratedAt. Covers BOTH base64 `photo` and external
+    // `photo_external_url` being moved onto R2. NULL = pending.
+    photoMigratedAt: epochMs("photo_migrated_at"),
   },
   (t) => [
     index("idx_missing_status_created").on(t.status, t.createdAt.desc()),
     index("idx_missing_map_coords").on(t.lat, t.lng),
+    index("idx_missing_photo_pending")
+      .on(t.id)
+      .where(
+        sql`photo_migrated_at IS NULL AND (photo IS NOT NULL OR photo_external_url IS NOT NULL)`,
+      ),
   ],
 );
 

@@ -110,6 +110,8 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE missing_persons ADD COLUMN IF NOT EXISTS photo_external_url TEXT`;
       await sql`ALTER TABLE missing_persons ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION`;
       await sql`ALTER TABLE missing_persons ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION`;
+      // Marca cuándo la foto se movió a R2 (ver worker/). NULL = pendiente.
+      await sql`ALTER TABLE missing_persons ADD COLUMN IF NOT EXISTS photo_migrated_at BIGINT`;
       // Identidad de registros externos por (source, external_id): permite que
       // dos fuentes usen el mismo id crudo sin chocar. Migra desde el índice
       // antiguo de solo external_id (crea el nuevo y luego suelta el viejo, de

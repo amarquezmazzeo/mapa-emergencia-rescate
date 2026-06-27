@@ -48,3 +48,17 @@ COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 USER node
 EXPOSE 3000
 CMD ["node", "server.js"]
+
+# ---- worker: BullMQ migration workers (separate Deployment, same image repo) ----
+# Carries the FULL node_modules (bullmq, ioredis, pg, @aws-sdk, tsx) + the TS
+# worker sources, run directly via tsx (no separate build). Selected with
+# `--target worker` or by overriding the k8s container command. Not the default
+# image target, so the app runtime above stays slim.
+FROM base AS worker
+ENV NODE_ENV=production
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json ./
+COPY worker ./worker
+USER node
+# Default to the worker process; the enqueue Job overrides this command.
+CMD ["node", "--import", "tsx", "worker/index.ts"]

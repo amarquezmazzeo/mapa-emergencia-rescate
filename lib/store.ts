@@ -31,6 +31,8 @@ function ensureSchema(): Promise<void> {
       `;
       await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS photo TEXT`;
       await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS confirmations INTEGER NOT NULL DEFAULT 0`;
+      // Marca cuándo la foto se movió a R2 (ver worker/). NULL = pendiente.
+      await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS photo_migrated_at BIGINT`;
       // Índice del listado: `listReports` ordena por created_at DESC.
       await sql`CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports (created_at DESC)`;
       // Tabla de dedup de confirmaciones (antes se creaba en cada confirmación).
