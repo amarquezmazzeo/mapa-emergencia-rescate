@@ -109,11 +109,11 @@ export default function MissingFoundForm({
       aria-modal="true"
       aria-labelledby="found-title"
       onClick={onCancel}
-      className="fixed inset-0 z-[2100] flex items-end justify-center bg-slate-900/60 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[2100] flex items-center justify-center bg-slate-900/60 p: sm:items-center sm:p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl sm:p-6"
+        className="max-h-[92vh] w-full max-w-md overflow-y-scroll rounded-2xl bg-white p-5 shadow-xl sm:rounded-2xl sm:p-6"
       >
         <div className="flex items-start justify-between gap-3">
           <h3 id="found-title" className="text-lg font-bold text-slate-900">

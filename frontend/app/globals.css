@@ -1286,9 +1286,9 @@ a:focus-visible,
 .e-person-modal-backdrop {
 	position: fixed;
 	inset: 0;
-	z-index: 200;
+	z-index: 2000;
 	display: flex;
-	align-items: flex-start;
+	align-items: center;
 	justify-content: center;
 	overflow-y: auto;
 	background: rgba(0, 0, 0, 0.6);
@@ -1299,7 +1299,8 @@ a:focus-visible,
 	position: relative;
 	width: 100%;
 	max-width: 420px;
-	overflow: hidden;
+	overflow: scroll;
+	max-height: calc(100dvh - 6rem);
 	border-radius: 24px;
 	background: var(--esurf);
 	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
